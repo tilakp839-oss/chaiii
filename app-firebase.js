@@ -6,7 +6,8 @@ const STORAGE_KEYS = {
     USERS: 'brewvote_users',
     VOTES: 'brewvote_votes',
     SESSIONS: 'brewvote_sessions',
-    CURRENT_USER: 'brewvote_current_user'
+    CURRENT_USER: 'brewvote_current_user',
+    NOTIFICATIONS: 'brewvote_notifications'
 };
 
 const SESSION_DURATION_MS = 10 * 60 * 1000; // 10 minutes
@@ -40,6 +41,9 @@ const app = {
         }
         if (!localStorage.getItem(STORAGE_KEYS.VOTES)) {
             localStorage.setItem(STORAGE_KEYS.VOTES, JSON.stringify([]));
+        }
+        if (!localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS)) {
+            localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify([]));
         }
 
         // Check Auth from localStorage
@@ -282,9 +286,11 @@ const app = {
         app.updateAdminUI();
         app.renderHistory();
         app.renderChart();
+        app.renderSubscribers();
         app.pollInterval = setInterval(() => {
             app.updateAdminUI();
             app.renderChart(); // Refresh chart live
+            app.renderSubscribers();
         }, 1000);
     },
 
@@ -378,6 +384,9 @@ const app = {
 
         sessions.unshift(newSession);
         localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions));
+        
+        // Notify subscribers
+        app.notifySubscribers('🎉 Voting session has started! Coffee or Tea?');
         
         app.showToast('Session Started!', 'success');
         app.updateAdminUI();
@@ -548,6 +557,102 @@ const app = {
         container.appendChild(el);
         lucide.createIcons();
         setTimeout(() => { if(el) el.remove(); }, 4000);
+    },
+
+    /* --- Notification System --- */
+
+    addNotificationSubscriber: (email) => {
+        if (!email || !email.includes('@')) {
+            app.showToast('Please enter a valid email', 'error');
+            return;
+        }
+
+        const notifications = JSON.parse(localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS) || '[]');
+        
+        // Check if already subscribed
+        if (notifications.find(n => n.email === email)) {
+            app.showToast('This email is already subscribed', 'info');
+            return;
+        }
+
+        notifications.push({
+            id: crypto.randomUUID(),
+            email: email,
+            subscribedAt: new Date().toISOString()
+        });
+
+        localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+        app.showToast(`✅ ${email} subscribed to notifications!`, 'success');
+    },
+
+    removeNotificationSubscriber: (email) => {
+        const notifications = JSON.parse(localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS) || '[]');
+        const updated = notifications.filter(n => n.email !== email);
+        localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
+        app.showToast(`Unsubscribed ${email}`, 'info');
+    },
+
+    getNotificationSubscribers: () => {
+        return JSON.parse(localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS) || '[]');
+    },
+
+    notifySubscribers: (message) => {
+        const subscribers = app.getNotificationSubscribers();
+        
+        if (subscribers.length === 0) {
+            console.log('No subscribers to notify');
+            return;
+        }
+
+        // Log notification event (in real app, send emails via backend)
+        console.log(`📧 Sending notification to ${subscribers.length} subscribers:`, message);
+        
+        // Show local notification
+        if (Notification.permission === 'granted') {
+            new Notification('Open Eyes Vote', {
+                body: message,
+                icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+            });
+        }
+
+        // Store notification in history
+        const notificationHistory = JSON.parse(localStorage.getItem('notification_history') || '[]');
+        notificationHistory.push({
+            id: crypto.randomUUID(),
+            message: message,
+            timestamp: new Date().toISOString(),
+            recipientCount: subscribers.length
+        });
+        localStorage.setItem('notification_history', JSON.stringify(notificationHistory));
+    },
+
+    renderSubscribers: () => {
+        const container = document.getElementById('subscribers-list');
+        const subscribers = app.getNotificationSubscribers();
+
+        if (subscribers.length === 0) {
+            container.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">No subscribers yet. Add your friend\'s email to notify them!</p>';
+            return;
+        }
+
+        container.innerHTML = subscribers.map(sub => `
+            <div class="flex items-center justify-between p-3 bg-white/40 rounded-lg border border-purple-100/50 hover:bg-white/60 transition-colors">
+                <div class="flex items-center gap-3 flex-1">
+                    <div class="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
+                        <i data-lucide="mail" class="w-4 h-4 text-purple-600"></i>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium text-gray-800">${sub.email}</p>
+                        <p class="text-xs text-gray-400">Subscribed ${new Date(sub.subscribedAt).toLocaleDateString()}</p>
+                    </div>
+                </div>
+                <button onclick="app.removeNotificationSubscriber('${sub.email}')" class="text-red-500 hover:text-red-700 transition-colors p-2" title="Remove subscriber">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+            </div>
+        `).join('');
+
+        lucide.createIcons();
     }
 };
 
