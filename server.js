@@ -146,6 +146,14 @@ app.get('/api/sessions', async (req, res) => {
 
 app.get('/api/sessions/active', async (req, res) => {
     try {
+        // For non-admin users, never return an active session
+        if (req.query.userId) {
+            const user = await User.findOne({ id: req.query.userId });
+            if (!user || user.role !== 'ADMIN') {
+                return res.json(null);
+            }
+        }
+        
         const session = await Session.findOne({ isActive: true });
         res.json(session || null);
     } catch (err) {
@@ -155,6 +163,12 @@ app.get('/api/sessions/active', async (req, res) => {
 
 app.post('/api/sessions/start', async (req, res) => {
     try {
+        // Check if user is admin
+        const user = await User.findOne({ id: req.query.userId });
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ error: 'Only admins can start sessions' });
+        }
+
         // Deactivate all active sessions
         await Session.updateMany({ isActive: true }, { isActive: false });
 
@@ -163,7 +177,8 @@ app.post('/api/sessions/start', async (req, res) => {
             id: require('crypto').randomUUID(),
             startTime: new Date(),
             isActive: true,
-            totalVotes: 0
+            totalVotes: 0,
+            createdBy: user.id
         };
 
         const session = await Session.create(newSession);

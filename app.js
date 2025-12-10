@@ -65,16 +65,8 @@ const app = {
             console.error('Init error:', err);
         }
 
-        // Check Auth from localStorage
-        const storedUser = localStorage.getItem('brewvote_current_user');
-        if (storedUser) {
-            app.user = JSON.parse(storedUser);
-            app.navigate();
-        } else {
-            app.showView('view-login');
-        }
-
-        // Initialize Icons
+        // No persistent session - always show login
+        app.showView('view-login');
         lucide.createIcons();
     },
 
@@ -141,31 +133,30 @@ const app = {
 
     handleLogin: async (e) => {
         e.preventDefault();
-        const id = document.getElementById('input-id').value;
-        const name = document.getElementById('input-name').value;
-        const errorMsg = document.getElementById('login-error');
-
-        if (!id) return;
+        const employeeId = document.getElementById('employeeId').value.trim();
+        
+        if (!employeeId) {
+            app.showToast('Please enter your employee ID', 'error');
+            return;
+        }
 
         try {
-            const user = await api.auth.login({
-                employeeId: id,
-                name: name || undefined,
-                role: app.loginMode
-            });
-
-            app.user = user;
-            localStorage.setItem('brewvote_current_user', JSON.stringify(app.user));
-            app.navigate();
+            const data = await api.auth.login({ employeeId });
+            app.user = data.user;
+            app.showView('view-dashboard');
+            
+            if (app.user.role === 'ADMIN') {
+                app.initAdminDashboard();
+            } else {
+                app.initEmployeeDashboard();
+            }
         } catch (err) {
-            console.error('Login error:', err);
-            errorMsg.classList.remove('hidden');
+            app.showToast(err.message || 'Login failed', 'error');
         }
     },
 
     logout: () => {
         app.user = null;
-        localStorage.removeItem('brewvote_current_user');
         clearInterval(app.pollInterval);
         clearInterval(app.timerInterval);
         app.showView('view-login');
@@ -173,13 +164,22 @@ const app = {
 
     /* --- Employee Logic --- */
 
-    initEmployeeDashboard: () => {
-        app.checkEmployeeStatus();
-        app.pollInterval = setInterval(app.checkEmployeeStatus, 5000);
-        
-        // Check Notification Permission
-        if (Notification.permission === 'default') {
-            document.getElementById('notification-permission-card').classList.remove('hidden');
+    initEmployeeDashboard: async () => {
+        // Only check status for admin users
+        if (app.user && app.user.role === 'ADMIN') {
+            await app.checkEmployeeStatus();
+            app.pollInterval = setInterval(app.checkEmployeeStatus, 5000);
+            
+            // Only request notification permission for admins
+            if (Notification.permission === 'default') {
+                document.getElementById('notification-permission-card').classList.remove('hidden');
+            }
+        } else {
+            // For non-admin users, hide the voting interface completely
+            document.getElementById('emp-state-waiting').classList.remove('hidden');
+            document.getElementById('emp-state-voting').classList.add('hidden');
+            document.getElementById('emp-state-voted').classList.add('hidden');
+            document.getElementById('notification-permission-card').classList.add('hidden');
         }
     },
 
@@ -194,17 +194,20 @@ const app = {
 
     checkEmployeeStatus: async () => {
         try {
-            const session = await api.sessions.getActive();
+            // Only admins can see active sessions
+            const session = await api.sessions.getActive({ userId: app.user.id });
             const waitView = document.getElementById('emp-state-waiting');
             const voteView = document.getElementById('emp-state-voting');
             const votedView = document.getElementById('emp-state-voted');
 
-            // Check for new session start (Notification)
-            if (session && session.id !== app.lastSessionId) {
-                if (app.lastSessionId !== null) { // Don't notify on first load
-                    app.showToast('🔔 Voting has started!', 'info');
-                    if (Notification.permission === 'granted') {
-                        new Notification("Open Eyes Vote", { body: "Voting started! Coffee or Tea?" });
+            // Only show notifications for admin users
+            if (app.user.role === 'ADMIN') {
+                if (session && session.id !== app.lastSessionId) {
+                    if (app.lastSessionId !== null) { // Don't notify on first load
+                        app.showToast('🔔 Voting has started!', 'info');
+                        if (Notification.permission === 'granted') {
+                            new Notification("Open Eyes Vote", { body: "Voting started! Coffee or Tea?" });
+                        }
                     }
                 }
             }
