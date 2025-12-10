@@ -65,8 +65,16 @@ const app = {
             console.error('Init error:', err);
         }
 
-        // No persistent session - always show login
-        app.showView('view-login');
+        // Check Auth from localStorage
+        const storedUser = localStorage.getItem('brewvote_current_user');
+        if (storedUser) {
+            app.user = JSON.parse(storedUser);
+            app.navigate();
+        } else {
+            app.showView('view-login');
+        }
+
+        // Initialize Icons
         lucide.createIcons();
     },
 
@@ -133,30 +141,31 @@ const app = {
 
     handleLogin: async (e) => {
         e.preventDefault();
-        const employeeId = document.getElementById('employeeId').value.trim();
-        
-        if (!employeeId) {
-            app.showToast('Please enter your employee ID', 'error');
-            return;
-        }
+        const id = document.getElementById('input-id').value;
+        const name = document.getElementById('input-name').value;
+        const errorMsg = document.getElementById('login-error');
+
+        if (!id) return;
 
         try {
-            const data = await api.auth.login({ employeeId });
-            app.user = data.user;
-            app.showView('view-dashboard');
-            
-            if (app.user.role === 'ADMIN') {
-                app.initAdminDashboard();
-            } else {
-                app.initEmployeeDashboard();
-            }
+            const user = await api.auth.login({
+                employeeId: id,
+                name: name || undefined,
+                role: app.loginMode
+            });
+
+            app.user = user;
+            localStorage.setItem('brewvote_current_user', JSON.stringify(app.user));
+            app.navigate();
         } catch (err) {
-            app.showToast(err.message || 'Login failed', 'error');
+            console.error('Login error:', err);
+            errorMsg.classList.remove('hidden');
         }
     },
 
     logout: () => {
         app.user = null;
+        localStorage.removeItem('brewvote_current_user');
         clearInterval(app.pollInterval);
         clearInterval(app.timerInterval);
         app.showView('view-login');
